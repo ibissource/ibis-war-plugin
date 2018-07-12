@@ -39,8 +39,8 @@
 
 	<scm>
 		<url>https://github.com/ibissource/ibis-war-plugin</url>
-		<developerConnection>https://github.com/ibissource/ibis-war-plugin.git</developerConnection>
-		<connection>https://github.com/ibissource/ibis-war-plugin.git</connection>
+		<developerConnection>scm:git:https://github.com/ibissource/ibis-war-plugin.git</developerConnection>
+		<connection>scm:git:https://github.com/ibissource/ibis-war-plugin.git</connection>
 		<tag>HEAD</tag>
 	</scm>
 
