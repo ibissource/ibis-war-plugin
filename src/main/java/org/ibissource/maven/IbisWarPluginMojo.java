@@ -1,3 +1,18 @@
+/*
+   Copyright 2018 Integration Partners
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
 package org.ibissource.maven;
 
 import java.io.File;
@@ -7,7 +22,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
-import org.apache.maven.execution.MavenSession;
+import java.text.SimpleDateFormat;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.LinkedList;
+import java.util.List;
+
+import org.apache.maven.archiver.MavenArchiveConfiguration;
+import org.apache.maven.model.Resource;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
 import org.apache.maven.plugins.annotations.Mojo;
@@ -16,31 +38,44 @@ import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.ResolutionScope;
 import org.apache.maven.plugins.war.WarMojo;
 import org.apache.maven.project.MavenProject;
-import org.apache.maven.settings.Settings;
 
 /**
- * This plugin enables the security constraints section in the ibis web.xml file
- *
+ * This plugin enables the security constraints section in the Ibis web.xml file, 
+ * populates the archive manifest file and appends the uncompiled java classes 
+ * to WEB-INF/classes.
+ * 
+ * @author Niels Meijer
  */
 @Mojo(name = "war", defaultPhase = LifecyclePhase.PACKAGE, threadSafe = true, requiresDependencyResolution = ResolutionScope.COMPILE_PLUS_RUNTIME )
 public class IbisWarPluginMojo extends WarMojo {
 
-	@Parameter( defaultValue = "${project}", readonly = true, required = true )
-	private MavenProject project;
-
-	@Parameter( defaultValue = "${session}", readonly = true, required = true )
-	private MavenSession session;
-
-	@Parameter( defaultValue = "${settings}", readonly = true, required = true )
-	private Settings settings;
+	@Parameter( defaultValue = "${project.build.sourceDirectory}", required = true )
+	private String sourceDirectory;
 
 	@Parameter( property = "war.enableSecurityConstraints", defaultValue = "true" )
 	private boolean enableSecurityConstraints;
 
+	@Parameter( property = "war.packageJavaClasses", defaultValue = "true" )
+	private boolean packageJavaClasses;
+
 	@Override
 	public void buildExplodedWebapp(File webapplicationDirectory) throws MojoExecutionException, MojoFailureException {
+		//It's Preferable to use the default web.xml file :)
+		setFailOnMissingWebXml(false);
+
+		//For debugging purposes we add the raw uncompiled java code to the war file.
+		if(packageJavaClasses) {
+			addJavaClassesToWar();
+		}
+
+		//Exclude gitignore files by default, but allow people to overwrite this
+		if(getPackagingExcludes().length == 0)
+			setPackagingExcludes(".gitignore");
+
+		//Trigger the webapp build
 		super.buildExplodedWebapp(webapplicationDirectory);
 
+		//Enable the security constraints in the IBIS web.xml
 		if(enableSecurityConstraints) {
 			getLog().info("Enabling security constraints");
 			File webXmlFile = new File( webapplicationDirectory, "WEB-INF/web.xml" );
@@ -57,8 +92,53 @@ public class IbisWarPluginMojo extends WarMojo {
 			}
 		}
 		else {
-			getLog().warn("Skipping security constraints");
+			getLog().warn("Skipping security constraints in web.xml");
 		}
+	}
+
+	public void addJavaClassesToWar() {
+		Resource[] webResources = getWebResources();
+		List<Resource> resources = new LinkedList<Resource>();
+
+		if(webResources != null) {
+			resources.addAll(Arrays.asList(webResources));
+			for(Resource resource : resources) {
+				getLog().info("Copying custom webResource ["+resource.getDirectory()+"] to ["+resource.getTargetPath()+"]");
+			}
+		}
+
+		Resource resource = new Resource();
+		resource.setDirectory(sourceDirectory);
+		resource.setTargetPath("WEB-INF/classes");
+		resources.add(resource);
+		getLog().info("Copying java webResources ["+sourceDirectory+"] to [WEB-INF\\classes]");
+
+		webResources = resources.toArray(new Resource[resources.size()]);
+		setWebResources(webResources);
+	}
+
+	/**
+	 * We like to populate the manifest with more information about the project
+	 */
+	@Override
+	public MavenArchiveConfiguration getArchive()
+	{
+		MavenProject project = getProject();
+
+		MavenArchiveConfiguration archive = super.getArchive();
+		if(archive == null)
+			archive = new MavenArchiveConfiguration();
+
+		SimpleDateFormat dt = new SimpleDateFormat("yyyy-MM-dd hh:mm:ss"); 
+		archive.addManifestEntry("Project", project.getName());
+		if(project.getDescription() != null)
+			archive.addManifestEntry("Description", project.getDescription());
+
+		archive.addManifestEntry("Created-Time", dt.format(new Date()));
+		archive.addManifestEntry("Build-Version", project.getVersion());
+		archive.addManifestEntry("Build-Artifact", project.getArtifactId());
+		archive.setAddMavenDescriptor(false);
+		return archive;
 	}
 
 	private void enableSecurityConstraints(File webXml) throws MojoExecutionException {
